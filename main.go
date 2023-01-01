@@ -9,21 +9,25 @@ import (
 	"strings"
 )
 
+const usage = `Usage: dn-check [options] [file ...]
+Options:
+  -f file : The file containing the domain names to check.
+  -o file : The file to write the results to.
+  -d list : A comma-separated list of TLDs to check
+  -h : Show the help message.
+`
+
 // Options struct
 type Options struct {
-	// File name to read the list of names from
-	FileName string
-	// List of TLDs to check
-	TLDs string
-	// Output file name
-	Output string
-	// Verbose mode
-	Verbose bool
-	// Extarcted from CLI options
+	FileName string // File name to read the list of names from
+	TLDs     string // List of TLDs to check
+	Output   string // Output file name
+	Verbose  bool   // Verbose mode
+	Help     bool   // Help
+
+	// Extracted from CLI options
 	TLDsList  []string
 	NamesList []string
-	// Help
-	Help bool
 }
 
 func isDomainNameAvailable(domain string) (bool, error) {
@@ -39,35 +43,23 @@ func isDomainNameAvailable(domain string) (bool, error) {
 
 // Open filename for read and read all lines into a list
 // Returns the list of names
-func readNamesFromFile(filename string) []string {
+func readNamesFromFile(filename string) ([]string, error) {
 	d, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	l := strings.Split(string(d), "\n")
-	if l[len(l)-1] == "" {
-		// drop last element if it is blank
-		return l[0 : len(l)-1]
+		return nil, err
 	} else {
-		return l
+		return strings.Split(strings.ToLower(string(d)), "\n"), nil
 	}
 }
 
-// Read options from the command line:
-// -f filename - read the list of names from the file
-// -d tlds - comma separated list of TLDs to check
-// -n names - comma separated list of names to check
-// -o output - output file name
-// -v - verbose mode
-// -h - help
 func readOptions() Options {
 	var options Options
 	flag.StringVar(&options.FileName, "f", "", "File name to read the list of names from, one name per line.")
-	flag.StringVar(&options.TLDs, "d", "com,ru,tech,ai", "Comma separated list of TLDs to check")
+	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check")
 	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided")
 	flag.BoolVar(&options.Verbose, "v", false, "Enable `verbose` mode") // not done
 	flag.BoolVar(&options.Help, "h", false, "Help message")
+	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
 
 	// Before anything else – check if we're asked for help
@@ -79,17 +71,22 @@ func readOptions() Options {
 	// put TLDs into a list from the comma separated string
 	options.TLDsList = strings.Split(options.TLDs, ",")
 	// read domain names from file specified via CLI and add them to the list
-	options.NamesList = readNamesFromFile(options.FileName)
+	l, err := readNamesFromFile(options.FileName)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	} else {
+		options.NamesList = l
+	}
 
 	return options
 }
 
-func main() {
-	opts := readOptions()
-
+func run(opts Options) {
 	for _, name := range opts.NamesList {
 		if name == "" {
-			goto LAST
+			// skip empty lines
+			continue
 		}
 		for _, tld := range opts.TLDsList {
 			dn, err := isDomainNameAvailable(name + "." + tld)
@@ -102,8 +99,10 @@ func main() {
 				fmt.Printf("%s.%s is %s available\n", name, tld, color.RedString("NOT"))
 			}
 		}
-	LAST:
 	}
+}
 
-	fmt.Printf("OK")
+func main() {
+	opts := readOptions()
+	run(opts)
 }
