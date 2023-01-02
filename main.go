@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/fatih/color"
@@ -28,6 +29,19 @@ type Options struct {
 	// Extracted from CLI options
 	TLDsList  []string
 	NamesList []string
+}
+
+// We want to implement the following JSON struct:
+// { [ { "name": "example", "tlds": [ { "tldname": "com", "isavailable": true }, { "tldname": "net", "isavailable": false } ] } ] }
+
+type TLD struct {
+	TLDName     string `json:"tld"`
+	IsAvailable bool   `json:"is_available"`
+}
+
+type Result struct {
+	Name    string `json:"name"`
+	TLDList []TLD  `json:"tlds"`
 }
 
 func isDomainNameAvailable(domain string) (bool, error) {
@@ -82,27 +96,63 @@ func readOptions() Options {
 	return options
 }
 
-func run(opts Options) {
+func run(opts Options) ([]Result, error) {
+	var Results []Result
+	var tlds []TLD
+
+	if opts.Verbose {
+		fmt.Println("Checking", len(opts.NamesList), "names for", len(opts.TLDsList), "TLDs")
+		fmt.Print("Names        ")
+		for _, t := range opts.TLDsList {
+			fmt.Printf(" %4s ", t)
+		}
+		fmt.Println()
+	}
+
 	for _, name := range opts.NamesList {
 		if name == "" {
 			// skip empty lines
 			continue
 		}
+		fmt.Printf("%-12s ", name)
+		tlds = nil
 		for _, tld := range opts.TLDsList {
 			dn, err := isDomainNameAvailable(name + "." + tld)
 			if err != nil {
 				fmt.Println(err)
-			}
-			if dn {
-				fmt.Printf("%s.%s is available\n", name, tld)
+				return nil, err
 			} else {
-				fmt.Printf("%s.%s is %s available\n", name, tld, color.RedString("NOT"))
+				if dn {
+					tlds = append(tlds, TLD{tld, true})
+					if opts.Verbose {
+						fmt.Print("  Yes ")
+						//fmt.Printf("%s.%s is available\n", name, tld)
+					}
+				} else {
+					tlds = append(tlds, TLD{tld, false})
+					if opts.Verbose {
+						fmt.Print(color.RedString("  NO  "))
+						//fmt.Printf("%s.%s is %s available\n", name, tld, color.RedString("NOT"))
+					}
+				}
 			}
 		}
+		fmt.Println()
+		Results = append(Results, Result{Name: name, TLDList: tlds})
 	}
+	return Results, nil
 }
 
 func main() {
 	opts := readOptions()
-	run(opts)
+	NamesResult, err := run(opts)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	} else {
+		if opts.Output != "" {
+			j, _ := json.Marshal(NamesResult)
+			fmt.Println(string(j))
+		}
+	}
 }
