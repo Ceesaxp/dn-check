@@ -10,40 +10,47 @@ import (
 	"strings"
 )
 
-const usage = `Usage: dn-check [options] [file ...]
+const usage = `Usage: dn-check [options]
 Options:
-  -f file : The file containing the domain names to check.
-  -o file : The file to write the results to.
-  -d list : A comma-separated list of TLDs to check
-  -h : Show the help message.
+  -d string
+        Comma separated list of TLDs to check, defaults to com.
+  -f filename
+        File name to read the list of names from, one name per line. Superseded by the -n option.
+  -h    Show this help message.
+  -j    Output using JSON format.
+  -n string
+        List of names to check, separated by comma. Takes precedence over -f option.
+  -o filename
+        Spool output to a filename provided.
+  -v    Enable verbose mode.
 `
 
-// Options struct
+// Options structure to hold the command line options
 type Options struct {
-	FileName string // File name to read the list of names from
-	TLDs     string // List of TLDs to check
-	Output   string // Output file name
-	Verbose  bool   // Verbose mode
-	Help     bool   // Help
-
-	// Extracted from CLI options
-	TLDsList  []string
-	NamesList []string
+	FileName  string   // FileName to read the list of names from ... OR
+	Names     string   // List of Names to check, separated by comma (takes precedence over FileName)
+	TLDs      string   // List of TLDs to check
+	Output    string   // Output file name
+	Verbose   bool     // Verbose mode
+	Json      bool     // Output JSON
+	Help      bool     // Help
+	TLDsList  []string // List of TLDs to check
+	NamesList []string // List of names either from the command line or read from file
 }
 
-// We want to implement the following JSON struct:
-// { [ { "name": "example", "tlds": [ { "tldname": "com", "isavailable": true }, { "tldname": "net", "isavailable": false } ] } ] }
-
+// TLD structure to keep the top-level domain availability data. Will be nested in the Result structure
 type TLD struct {
 	TLDName     string `json:"tld"`
 	IsAvailable bool   `json:"is_available"`
 }
 
+// Result structure to keep the results of the check
 type Result struct {
 	Name    string `json:"name"`
 	TLDList []TLD  `json:"tlds"`
 }
 
+// Lookup a domain name using. Return true if the name is available, otherwise false
 func isDomainNameAvailable(domain string) (bool, error) {
 	_, err := net.LookupHost(domain)
 	if err != nil {
@@ -66,31 +73,40 @@ func readNamesFromFile(filename string) ([]string, error) {
 	}
 }
 
+// Read the command line options
 func readOptions() Options {
 	var options Options
-	flag.StringVar(&options.FileName, "f", "", "File name to read the list of names from, one name per line.")
-	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check")
-	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided")
-	flag.BoolVar(&options.Verbose, "v", false, "Enable `verbose` mode") // not done
-	flag.BoolVar(&options.Help, "h", false, "Help message")
+	flag.StringVar(&options.FileName, "f", "", "File name to read the list of names from, one name per line. Superseded by the -n option.")
+	flag.StringVar(&options.Names, "n", "", "List of names to check, separated by comma. Takes precedence over -f option.")
+	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check.")
+	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided.")
+	flag.BoolVar(&options.Json, "j", false, "Output using JSON format.")
+	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // TODO: Implement
+	flag.BoolVar(&options.Help, "h", false, "Show this help message.")
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
 
 	// Before anything else – check if we're asked for help
-	if options.Help || options.FileName == "" {
+	if options.Help {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
 
 	// put TLDs into a list from the comma separated string
 	options.TLDsList = strings.Split(options.TLDs, ",")
-	// read domain names from file specified via CLI and add them to the list
-	l, err := readNamesFromFile(options.FileName)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+
+	if options.Names == "" {
+		if options.FileName == "" {
+			fmt.Println("Error: No names provided")
+			flag.PrintDefaults()
+			os.Exit(1)
+		} else {
+			// Read names from file
+			options.NamesList, _ = readNamesFromFile(options.FileName)
+		}
 	} else {
-		options.NamesList = l
+		// Read names from command line
+		options.NamesList = strings.Split(options.Names, ",")
 	}
 
 	return options
@@ -101,12 +117,7 @@ func run(opts Options) ([]Result, error) {
 	var tlds []TLD
 
 	if opts.Verbose {
-		fmt.Println("Checking", len(opts.NamesList), "names for", len(opts.TLDsList), "TLDs")
-		fmt.Print("Names        ")
-		for _, t := range opts.TLDsList {
-			fmt.Printf(" %4s ", t)
-		}
-		fmt.Println()
+		PrintVerboseHeader(opts)
 	}
 
 	for _, name := range opts.NamesList {
@@ -114,33 +125,77 @@ func run(opts Options) ([]Result, error) {
 			// skip empty lines
 			continue
 		}
-		fmt.Printf("%-12s ", name)
+		if opts.Verbose {
+			fmt.Printf("%-12s ", name)
+		}
 		tlds = nil
 		for _, tld := range opts.TLDsList {
-			dn, err := isDomainNameAvailable(name + "." + tld)
+			dnAvailable, err := isDomainNameAvailable(name + "." + tld)
 			if err != nil {
 				fmt.Println(err)
 				return nil, err
-			} else {
-				if dn {
-					tlds = append(tlds, TLD{tld, true})
-					if opts.Verbose {
-						fmt.Print("  Yes ")
-						//fmt.Printf("%s.%s is available\n", name, tld)
-					}
-				} else {
-					tlds = append(tlds, TLD{tld, false})
-					if opts.Verbose {
-						fmt.Print(color.RedString("  NO  "))
-						//fmt.Printf("%s.%s is %s available\n", name, tld, color.RedString("NOT"))
-					}
-				}
+			}
+			tlds = append(tlds, TLD{tld, dnAvailable})
+			if opts.Verbose {
+				VerboseOutput(dnAvailable)
 			}
 		}
 		fmt.Println()
 		Results = append(Results, Result{Name: name, TLDList: tlds})
 	}
 	return Results, nil
+}
+
+// VerboseOutput : Helper function to print YES/NO
+func VerboseOutput(s bool) {
+	if s {
+		fmt.Print(color.GreenString("YES  "))
+	} else {
+		fmt.Print(color.RedString("NO   "))
+	}
+}
+
+// PrintVerboseHeader : Prints the header for the verbose output
+func PrintVerboseHeader(opts Options) {
+	fmt.Println("Checking", len(opts.NamesList), "names for", len(opts.TLDsList), "TLDs")
+	fmt.Print("Names       ")
+	for _, t := range opts.TLDsList {
+		fmt.Printf(" %-4s", t)
+	}
+	fmt.Println()
+}
+
+// SpoolOutputToFile : Output results to a file
+func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) error {
+	if outputFileName != "" {
+		f, err := os.Create(outputFileName)
+		if err != nil {
+			return err
+		}
+		defer func(f *os.File) {
+			err := f.Close()
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}(f)
+		if jsonOutput {
+			err := json.NewEncoder(f).Encode(result)
+			if err != nil {
+				return err
+			}
+		} else {
+			for _, r := range result {
+				for _, t := range r.TLDList {
+					_, err = fmt.Fprintf(f, "%s.%s : %t", r.Name, t.TLDName, t.IsAvailable)
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func main() {
@@ -151,8 +206,11 @@ func main() {
 		os.Exit(1)
 	} else {
 		if opts.Output != "" {
-			j, _ := json.Marshal(NamesResult)
-			fmt.Println(string(j))
+			err := SpoolOutputToFile(opts.Output, NamesResult, opts.Json)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
 		}
 	}
 }
