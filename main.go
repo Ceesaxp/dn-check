@@ -81,7 +81,7 @@ func readOptions() Options {
 	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check.")
 	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided.")
 	flag.BoolVar(&options.Json, "j", false, "Output using JSON format.")
-	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // TODO: Refactor
+	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // FIXME: Refactor
 	flag.BoolVar(&options.Help, "h", false, "Show this help message.")
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
@@ -169,30 +169,28 @@ func PrintVerboseHeader(opts Options) {
 
 // SpoolOutputToFile : Output results to a file
 func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) error {
-	if outputFileName != "" {
-		f, err := os.Create(outputFileName)
+	f, err := os.Create(outputFileName)
+	if err != nil {
+		return err
+	}
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}(f)
+	if jsonOutput {
+		err := json.NewEncoder(f).Encode(result)
 		if err != nil {
 			return err
 		}
-		defer func(f *os.File) {
-			err := f.Close()
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-		}(f)
-		if jsonOutput {
-			err := json.NewEncoder(f).Encode(result)
-			if err != nil {
-				return err
-			}
-		} else {
-			for _, r := range result {
-				for _, t := range r.TLDList {
-					_, err = fmt.Fprintf(f, "%s.%s : %t\n", r.Name, t.TLDName, t.IsAvailable)
-					if err != nil {
-						return err
-					}
+	} else {
+		for _, r := range result {
+			for _, t := range r.TLDList {
+				_, err = fmt.Fprintf(f, "%s.%s : %t\n", r.Name, t.TLDName, t.IsAvailable)
+				if err != nil {
+					return err
 				}
 			}
 		}
