@@ -81,7 +81,7 @@ func readOptions() Options {
 	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check.")
 	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided.")
 	flag.BoolVar(&options.Json, "j", false, "Output using JSON format.")
-	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // TODO: Implement
+	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // TODO: Refactor
 	flag.BoolVar(&options.Help, "h", false, "Show this help message.")
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
@@ -140,7 +140,9 @@ func run(opts Options) ([]Result, error) {
 				VerboseOutput(dnAvailable)
 			}
 		}
-		fmt.Println()
+		if opts.Verbose {
+			fmt.Println()
+		}
 		Results = append(Results, Result{Name: name, TLDList: tlds})
 	}
 	return Results, nil
@@ -187,7 +189,7 @@ func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) 
 		} else {
 			for _, r := range result {
 				for _, t := range r.TLDList {
-					_, err = fmt.Fprintf(f, "%s.%s : %t", r.Name, t.TLDName, t.IsAvailable)
+					_, err = fmt.Fprintf(f, "%s.%s : %t\n", r.Name, t.TLDName, t.IsAvailable)
 					if err != nil {
 						return err
 					}
