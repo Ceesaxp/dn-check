@@ -87,8 +87,8 @@ func readNamesFromFile(filename string) ([]string, error) {
 func readOptions() Options {
 	var options Options
 	flag.StringVar(&options.FileName, "f", "", "File name to read the list of names from, one name per line. Superseded by the -n option.")
-	flag.StringVar(&options.Names, "n", "", "List of names to check, separated by comma. Takes precedence over -f option.")
-	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check.")
+	flag.StringVar(&options.Names, "n", "avosend,avopay", "List of names to check, separated by comma. Takes precedence over -f option.")
+	flag.StringVar(&options.TLDs, "d", "com,ru,ai", "Comma separated list of TLDs to check.")
 	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided.")
 	flag.BoolVar(&options.Json, "j", false, "Output using JSON format.")
 	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // FIXME: Refactor
@@ -260,14 +260,17 @@ func main() {
 			fmt.Println(string(jsonData))
 		}
 	} else {
+		PrintVerboseHeader(options)
 		for result := range results {
+			fmt.Printf("%-12s ", result.Name)
 			for _, tld := range result.TLDList {
 				if tld.IsAvailable {
-					fmt.Printf("%s.%s is available\n", result.Name, tld.TLDName)
+					fmt.Printf("%s", color.GreenString("YES  "))
 				} else {
-					fmt.Printf("%s.%s is not available\n", result.Name, tld.TLDName)
+					fmt.Printf("%s", color.RedString("NO   "))
 				}
 			}
+			fmt.Println()
 		}
 	}
 }
