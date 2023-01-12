@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 )
 
 const usage = `Usage: dn-check [options]
@@ -65,12 +67,20 @@ func isDomainNameAvailable(domain string) (bool, error) {
 // Open filename for read and read all lines into a list
 // Returns the list of names
 func readNamesFromFile(filename string) ([]string, error) {
-	d, err := os.ReadFile(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
-	} else {
-		return strings.Split(strings.ToLower(string(d)), "\n"), nil
 	}
+	defer file.Close()
+	names := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		names = append(names, strings.TrimSpace(scanner.Text()))
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // Read the command line options
@@ -110,6 +120,21 @@ func readOptions() Options {
 	}
 
 	return options
+}
+
+func checkDomains(name string, tlds []string, results chan<- Result, wg *sync.WaitGroup) {
+	defer wg.Done()
+	var tldList []TLD
+	for _, tld := range tlds {
+		domain := name + "." + tld
+		available, err := isDomainNameAvailable(domain)
+		if err != nil {
+			fmt.Printf("Error checking availability for domain %s: %s", domain, err)
+			continue
+		}
+		tldList = append(tldList, TLD{TLDName: tld, IsAvailable: available})
+	}
+	results <- Result{Name: name, TLDList: tldList}
 }
 
 func run(opts Options) ([]Result, error) {
@@ -199,17 +224,49 @@ func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) 
 }
 
 func main() {
-	opts := readOptions()
-	NamesResult, err := run(opts)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	} else {
-		if opts.Output != "" {
-			err := SpoolOutputToFile(opts.Output, NamesResult, opts.Json)
+	options := readOptions()
+	var results = make(chan Result)
+	var wg sync.WaitGroup
+
+	for _, name := range options.NamesList {
+		for _, tld := range options.TLDsList {
+			wg.Add(1)
+			go checkDomains(name, []string{tld}, results, &wg)
+		}
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	if options.Json {
+		var jsonResults []Result
+		for result := range results {
+			jsonResults = append(jsonResults, result)
+		}
+		jsonData, err := json.MarshalIndent(jsonResults, "", "  ")
+		if err != nil {
+			fmt.Printf("Error marshaling JSON: %s", err)
+			os.Exit(1)
+		}
+		if options.Output != "" {
+			err := os.WriteFile(options.Output, jsonData, 0644)
 			if err != nil {
-				fmt.Println(err)
+				fmt.Printf("Error writing JSON data to file %s: %s", options.Output, err)
 				os.Exit(1)
+			}
+		} else {
+			fmt.Println(string(jsonData))
+		}
+	} else {
+		for result := range results {
+			for _, tld := range result.TLDList {
+				if tld.IsAvailable {
+					fmt.Printf("%s.%s is available\n", result.Name, tld.TLDName)
+				} else {
+					fmt.Printf("%s.%s is not available\n", result.Name, tld.TLDName)
+				}
 			}
 		}
 	}

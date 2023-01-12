@@ -1,4 +1,4 @@
-module github.com/Ceesaxp/dn_check
+module github.com/Ceesaxp/dn-check
 
 go 1.17
 
