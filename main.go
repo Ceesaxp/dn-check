@@ -40,13 +40,13 @@ type Options struct {
 
 // TLD structure to keep the top-level domain availability data. Will be nested in the Result structure
 type TLD struct {
-	TLDName     string `json:"tld"`
+	TLDName     string `json:"top_level_domain"`
 	IsAvailable bool   `json:"is_available"`
 }
 
 // Result structure to keep the results of the check
 type Result struct {
-	Name    string `json:"name"`
+	Name    string `json:"domain_name"`
 	TLDList []TLD  `json:"tlds"`
 }
 
@@ -81,7 +81,7 @@ func readOptions() Options {
 	flag.StringVar(&options.TLDs, "d", "com", "Comma separated list of TLDs to check.")
 	flag.StringVar(&options.Output, "o", "", "Spool output to a `filename` provided.")
 	flag.BoolVar(&options.Json, "j", false, "Output using JSON format.")
-	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.") // FIXME: Refactor
+	flag.BoolVar(&options.Verbose, "v", false, "Enable verbose mode.")
 	flag.BoolVar(&options.Help, "h", false, "Show this help message.")
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
@@ -168,7 +168,7 @@ func PrintVerboseHeader(opts Options) {
 }
 
 // SpoolOutputToFile : Output results to a file
-func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) error {
+func SpoolOutputToFile(outputFileName string, results []Result, jsonOutput bool) error {
 	f, err := os.Create(outputFileName)
 	if err != nil {
 		return err
@@ -181,14 +181,19 @@ func SpoolOutputToFile(outputFileName string, result []Result, jsonOutput bool) 
 		}
 	}(f)
 	if jsonOutput {
-		err := json.NewEncoder(f).Encode(result)
+		// Format and output JSON into file if requested
+		jsonText, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(jsonText)
 		if err != nil {
 			return err
 		}
 	} else {
-		for _, r := range result {
-			for _, t := range r.TLDList {
-				_, err = fmt.Fprintf(f, "%s.%s : %t\n", r.Name, t.TLDName, t.IsAvailable)
+		for _, result := range results {
+			for _, tld := range result.TLDList {
+				_, err = fmt.Fprintf(f, "%s.%s : %t\n", result.Name, tld.TLDName, tld.IsAvailable)
 				if err != nil {
 					return err
 				}
